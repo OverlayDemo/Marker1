@@ -8,70 +8,67 @@
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
-  <script>
-    // --- CHROMA KEY SHADER ---
-    AFRAME.registerShader('chromakey', {
-      schema: {
-        src: {type: 'map'},
-        color: {type: 'color', default: '#00FF00'}, // The color to remove
-        threshold: {type: 'number', default: 0.1}   // How strictly to match the green
-      },
-      init: function(data) {
-        this.textureSrc = data.src;
-        this.material = new THREE.ShaderMaterial({
-          uniforms: {
-            texture: {type: 't', value: data.src},
-            color: {type: 'c', value: new THREE.Color(data.color)},
-            threshold: {type: 'f', value: data.threshold}
-          },
-          vertexShader: `
-            varying vec2 vUv;
-            void main() {
-              vUv = uv;
-              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-            }
-          `,
-          fragmentShader: `
-            uniform sampler2D texture;
-            uniform vec3 color;
-            uniform float threshold;
-            varying vec2 vUv;
-            void main() {
-              vec4 texColor = texture2D(texture, vUv);
-              float diff = distance(texColor.rgb, color);
-              if (diff < threshold) {
-                discard;
-              } else {
-                gl_FragColor = texColor;
-              }
-            }
-          `,
-          transparent: true
-        });
-      },
-      update: function(data) {
-        this.material.uniforms.texture.value = data.src;
-        this.material.uniforms.color.value = new THREE.Color(data.color);
-        this.material.uniforms.threshold.value = data.threshold;
-      }
-    });
-  </script>
-
   <style>
-    body { margin: 0; font-family: 'Poppins', sans-serif; background: #000; }
-    .button-panel { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: none; z-index: 100; }
-    .plan-button { padding: 12px 24px; font-size: 15px; font-weight: bold; border: none; border-radius: 8px; background-color: #5E0F8B; color: #fff; cursor: pointer; min-width: 160px; }
-    .a-enter-vr-button { display: none !important; }
-    #toast { position: absolute; top: 20px; right: 20px; background: rgba(255,255,255,0.12); color: white; padding: 8px 12px; border-radius: 8px; z-index: 200; display: none; }
+    body {
+      margin: 0;
+      font-family: 'Poppins', sans-serif;
+      background: #000;
+      overflow: hidden;
+    }
+
+    .button-panel {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      z-index: 100;
+    }
+
+    .plan-button {
+      padding: 12px 24px;
+      font-size: 15px;
+      font-weight: bold;
+      border: none;
+      border-radius: 8px;
+      background-color: #5E0F8B;
+      color: #fff;
+      cursor: pointer;
+      min-width: 160px;
+      transition: background 0.3s;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    }
+
+    .plan-button:hover {
+      background-color: #7a17b8;
+    }
+
+    .a-enter-vr-button {
+      display: none !important;
+    }
+
+    #toast {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: rgba(255,255,255,0.2);
+      backdrop-filter: blur(5px);
+      color: white;
+      padding: 10px 18px;
+      border-radius: 8px;
+      z-index: 200;
+      display: none;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
 
-  <div class="button-panel" id="planButtons">
-    <button class="plan-button" id="toggleButton">▶️ Play Video</button>
+  <div class="button-panel" id="planButtons" aria-hidden="true">
+    <button class="plan-button" id="toggleButton" aria-pressed="false">▶️ Play Video</button>
   </div>
 
-  <div id="toast">Action Disabled</div>
+  <div id="toast" role="status" aria-live="polite">Action Disabled</div>
 
   <a-scene 
     mindar-image="imageTargetSrc: ./targets.mind" 
@@ -87,56 +84,142 @@
     <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
     <a-entity id="target1" mindar-image-target="targetIndex: 0">
-      <a-plane 
-        id="videoDisplay" 
-        position="0 0 0" 
-        width="1" 
-        height="1" 
-        material="shader: chromakey; src: #plan1Video; color: 0 1 0; threshold: 0.1; side: double">
-      </a-plane>
+     <a-plane 
+  id="videoDisplay" 
+  position="0 0 0" 
+  width="1" 
+  height="1" 
+  material="shader: chromakey; src: #plan1Video; color: #00FF00; threshold: 0.4; smoothness: 0.1; side: double; transparent: true">
+</a-plane>
     </a-entity>
   </a-scene>
 
   <script>
-    // [The rest of your existing logic for playback and security remains exactly the same]
+    /**
+     * CUSTOM CHROMA KEY SHADER
+     * Removes a specific color (Green) from the video texture in real-time.
+     */
+    AFRAME.registerShader('chromakey', {
+      schema: {
+        src: {type: 'map'},
+        color: {type: 'color', default: '#00FF00'},
+        threshold: {type: 'number', default: 0.1}
+      },
+      init: function(data) {
+        const videoTexture = new THREE.VideoTexture(data.src);
+        videoTexture.minFilter = THREE.LinearFilter;
+        videoTexture.magFilter = THREE.LinearFilter;
+        videoTexture.format = THREE.RGBAFormat;
+
+        this.material = new THREE.ShaderMaterial({
+          uniforms: {
+            tex: {value: videoTexture},
+            keyColor: {value: new THREE.Color(data.color)},
+            similarity: {value: data.threshold}
+          },
+          vertexShader: `
+            varying vec2 vUv;
+            void main() {
+              vUv = uv;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: `
+            uniform sampler2D tex;
+            uniform vec3 keyColor;
+            uniform float similarity;
+            varying vec2 vUv;
+            void main() {
+              vec4 videoColor = texture2D(tex, vUv);
+              float dist = distance(videoColor.rgb, keyColor);
+              if (dist < similarity) {
+                discard;
+              }
+              gl_FragColor = videoColor;
+            }
+          `,
+          transparent: true
+        });
+      },
+      update: function(data) {
+        this.material.uniforms.similarity.value = data.threshold;
+        this.material.uniforms.keyColor.value = new THREE.Color(data.color);
+      }
+    });
+
+    // --- Core Logic ---
     const sceneEl = document.querySelector('a-scene');
     const videoDisplay = document.querySelector('#videoDisplay');
     const videoEl = document.querySelector('#plan1Video');
     const buttonsContainer = document.querySelector('#planButtons');
     const toggleButton = document.querySelector('#toggleButton');
     const target = document.querySelector('#target1');
+    const toast = document.querySelector('#toast');
 
     let isPlaying = false;
 
+    function showToast(msg, t = 1200) {
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, t);
+    }
+
+    // --- MindAR Event Listeners ---
     target.addEventListener('targetFound', () => {
       buttonsContainer.style.display = 'block';
+      buttonsContainer.setAttribute('aria-hidden', 'false');
     });
 
     target.addEventListener('targetLost', () => {
       buttonsContainer.style.display = 'none';
-      videoEl.pause();
+      buttonsContainer.setAttribute('aria-hidden', 'true');
+      if (!videoEl.paused) videoEl.pause();
       isPlaying = false;
       toggleButton.textContent = "▶️ Play Video";
     });
 
+    // --- Playback Toggle ---
     toggleButton.addEventListener('click', async () => {
       if (!isPlaying) {
         try {
           await videoEl.play();
           isPlaying = true;
           toggleButton.textContent = "⏸ Pause Video";
+          toggleButton.setAttribute('aria-pressed', 'true');
         } catch (err) {
-          console.warn(err);
+          console.error('Playback blocked:', err);
+          showToast('Tap screen to allow video');
         }
       } else {
         videoEl.pause();
         isPlaying = false;
         toggleButton.textContent = "▶️ Play Video";
+        toggleButton.setAttribute('aria-pressed', 'false');
       }
     });
 
-    // Security/Context Menu scripts...
-    document.addEventListener("contextmenu", (e) => e.preventDefault());
+    // --- Security Features ---
+    document.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      showToast("Action Disabled");
+    });
+
+    document.addEventListener("keydown", (e) => {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const meta = isMac ? e.metaKey : e.ctrlKey;
+      if (
+        e.key === "F12" ||
+        (meta && e.shiftKey && (e.key === "I" || e.key === "J" || e.key === "C")) ||
+        (meta && e.key === "u")
+      ) {
+        e.preventDefault();
+        showToast("Action Disabled");
+      }
+    });
+
+    window.addEventListener('pagehide', () => {
+      if (!videoEl.paused) videoEl.pause();
+    });
   </script>
 </body>
 </html>
